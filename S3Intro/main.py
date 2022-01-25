@@ -1,56 +1,44 @@
-import boto3
-import pandas as pd
-import io
-
-s3_client = boto3.client("s3")
-s3_resource = boto3.resource("s3")
-bucket_name = "data-eng-resources"
-bucket = s3_resource.Bucket(bucket_name)
+from pprint import pprint as pp
+from s3 import S3
+import pymongo
 
 
-# read all csv with the prefix and add them to and return a list of dfs
-def read_all_csv():
-    prefix_objs = bucket.objects.filter(Prefix="python/fish-market")
-    df_lst = []
-    for obj in prefix_objs:
-        try:
-            body = obj.get()['Body'].read()
-            temp = pd.read_csv(io.BytesIO(body), header=[0], encoding='utf8', sep=',')
-            df_lst.append(temp)
-        except:
-            continue
-    return df_lst
+# connect to the mongodb client and return the db
+def get_mongo_db(client_str):
+    client = pymongo.MongoClient(client_str)
+    db = client.Sparta
+    return db
 
 
-# merge all df in the list of dfs into one
-def merge_dfs(df_list):
-    merged = pd.concat(df_list, ignore_index=True)
-    return merged
-
-
-# group and avg the df by species, returning the resulting df
-def group_and_avg(df):
-    grouped = df.groupby(["Species"]).mean()
-    return grouped
-
-
-# round all the values in the df to 2 d.p
-def round_all(df):
-    rounded = df.round(2)
-    return rounded
-
-
-# convert the df to csv then upload to s3 bucket
-def df_to_s3(df):
-    df.to_csv("JordanB.csv")
-    s3_client.upload_file(Filename="JordanB.csv", Bucket=bucket_name, Key="Data26/fish/JordanB.csv")
+# inserts the df into the given db document
+def insert_df_to_db(dataframe, db, document):
+    db[document].insert_many(dataframe.to_dict("records"))
 
 
 if __name__ == "__main__":
 
-    df = merge_dfs(read_all_csv())
-    final = round_all(group_and_avg(df))
-    df_to_s3(final)
+    s3_instance = S3("data-eng-resources")  # INIT S3 class object
+    df = s3_instance.merge_dfs(s3_instance.read_all_csv())  # read and merge the df of different csv
+    final_df = s3_instance.round_all(s3_instance.group_and_avg(df))  # group, avg, and round the values in the merged df
+    final_df = final_df.reset_index()  # remove "Species" as the index
+    #print(final_df)
+
+    database = get_mongo_db("mongodb://3.71.86.26:27017/Sparta")  # INIT db
+    database.fishmarket.drop()
+    database.create_collection('fishmarket')
+    insert_df_to_db(final_df, database, 'fishmarket')  # insert final df into the collection
+
+    #print(database.list_collection_names())
+    cursor = database.get_collection('fishmarket')
+    c = cursor.find()
+
+    for doc in c:
+        pp(doc)
+
+    my_collection = database.fishmarket
+    total_count = my_collection.count_documents({})
+    print("Total number of documents : ", total_count)
+
 
 
 
